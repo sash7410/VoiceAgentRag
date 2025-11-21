@@ -1,0 +1,14 @@
+livekit-agents
+livekit-plugins-openai
+livekit-plugins-silero
+langchain
+langchain-community
+langchain-openai
+chromadb
+pypdf
+python-dotenv
+openai
+reportlab
+pytest
+
+
