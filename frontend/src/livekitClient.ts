@@ -48,8 +48,17 @@ export function useSkylineLiveKit(
   }, []);
 
   const startCall = useCallback(async () => {
+    // If there is a lingering room instance for any reason, make sure it is
+    // fully disconnected before starting a new call. This helps avoid cases
+    // where LiveKit still thinks a participant is present.
     if (roomRef.current) {
-      return;
+      try {
+        await roomRef.current.disconnect();
+      } catch {
+        // Ignore disconnect errors; we'll replace the room instance anyway.
+      }
+      roomRef.current = null;
+      setIsConnected(false);
     }
 
     const url = import.meta.env.VITE_LIVEKIT_URL as string | undefined;

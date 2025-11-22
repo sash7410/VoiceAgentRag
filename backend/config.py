@@ -90,6 +90,8 @@ def load_config() -> AppConfig:
     else:
         handbook_path = PROJECT_ROOT / "backend" / "resources" / "dealer_handbook.pdf"
 
+    print(f"Handbook path: {handbook_path}")
+
     return AppConfig(
         livekit=LiveKitConfig(
             url=livekit_url,

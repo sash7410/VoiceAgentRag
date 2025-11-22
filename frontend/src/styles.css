@@ -151,4 +151,23 @@ body {
   margin-top: 0.75rem;
 }
 
+.upload-section {
+  margin-top: 1.1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(82, 105, 190, 0.45);
+}
+
+.upload-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.87rem;
+  color: #c7ccf0;
+}
+
+.upload-label input[type="file"] {
+  font-size: 0.8rem;
+  color: #dfe3ff;
+}
+
 

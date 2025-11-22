@@ -3,14 +3,24 @@
 Generate a LiveKit access token for local development.
 
 Usage:
+    source .venv/bin/activate
     python scripts/generate_token.py
+
+This prints a JWT you can paste into `frontend/.env.local` as VITE_LIVEKIT_TOKEN.
 """
+
+from __future__ import annotations
 
 from backend.config import load_config
 from livekit import api
 
 
-def main():
+def generate_token(identity: str = "local-web") -> str:
+    """
+    Generate a JWT with permissions to join the default LiveKit room.
+
+    - identity: human-readable identity for the browser client.
+    """
     cfg = load_config()
 
     token = (
@@ -18,7 +28,7 @@ def main():
             api_key=cfg.livekit.api_key,
             api_secret=cfg.livekit.api_secret,
         )
-        .with_identity("local-web")
+        .with_identity(identity)
         .with_grants(
             api.VideoGrants(
                 room_join=True,
@@ -30,10 +40,12 @@ def main():
         )
         .to_jwt()
     )
+    return token
 
-    print(token)
+
+def main() -> None:
+    print(generate_token())
 
 
 if __name__ == "__main__":
     main()
-

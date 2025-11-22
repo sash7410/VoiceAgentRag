@@ -66,22 +66,24 @@ python backend/resources/make_dealer_handbook.py
 
 This writes `backend/resources/dealer_handbook.pdf`, which the RAG layer indexes.
 
-5. **Run the LiveKit Agent worker (single canonical command)**
+5. **Run backend services (agent worker + upload helper server)**
 
-In normal usage you only need one command to start the backend worker:
+For local development you can start both the LiveKit agent worker and the
+optional upload helper server from a *single* terminal:
+
+```bash
+python scripts/run_backend.py
+```
+
+This is equivalent to running:
 
 ```bash
 python -m backend.agent start
+python -m backend.upload_server
 ```
 
-This uses the entrypoint defined in `backend/agent.py` and connects to LiveKit
-Cloud, waiting for calls in the `LIVEKIT_ROOM_NAME` room.
-
-You can run the following if you are curious about extra dev options:
-
-```bash
-python -m backend.agent --help
-```
+in two separate terminals. Using the helper script just saves you from managing
+multiple shells. If you prefer to run things manually, you still can.
 
 ### Frontend Setup (React)
 
@@ -130,8 +132,8 @@ Open the printed localhost URL (usually `http://localhost:5173`) in your browser
 ### RAG and Inventory Tooling
 
 - **RAG**:
-  - Implemented in `backend/rag/handbook_rag.py` using LangChain, Chroma, and
-    OpenAI embeddings.
+  - Implemented in `backend/rag/handbook_rag.py` using **LangChain**, an in‑process
+    **Chroma** vector store, and **OpenAI embeddings**.
   - Helper `retrieve_handbook_context(query, k=3)` returns the most relevant
     chunks from the dealer handbook PDF.
   - `build_handbook_reference(query, k=3)` formats those chunks into a compact
@@ -141,6 +143,24 @@ Open the printed localhost URL (usually `http://localhost:5173`) in your browser
     `model`, `trim`, `body_type`, `price`, `color`, and `in_stock`.
   - `search_inventory(body_type, min_price, max_price)` filters this list and
     is exposed to the LLM as a tool for questions like “sedan between $18k and $28k”.
+
+#### RAG design choices (brief)
+
+- **Why Chroma (in‑process)**: for this V1, an embedded Chroma store keeps
+  deployment simple: no extra services or containers, and the index builds
+  lazily on first use. The trade‑off is that very large PDFs or many concurrent
+  users would benefit from a dedicated vector DB and persistent indexes.
+- **Chunking strategy**: the handbook is split into ~800‑character chunks with
+  200‑character overlap. This keeps each chunk self‑contained (enough local
+  context for a paragraph or two) while avoiding very large prompts; for a
+  larger corpus you might tune this up or down based on retrieval quality.
+- **Embeddings**: OpenAI embeddings are used for convenience and quality; they
+  give good semantic search with minimal configuration. A local embedding model
+  would avoid network calls but add infra/CPU complexity.
+- **Soft grounding**: the retrieved chunks are injected as an additional
+  `system`‑style message rather than hard‑constraining the model. This lets the
+  agent answer naturally while being guided by the handbook, at the cost of
+  occasional “extra” details from the model’s prior knowledge.
 
 ### Running Tests
 
@@ -186,4 +206,5 @@ The backend now includes extensive emoji-based logging:
 - 📤 Transcript publishing
 
 Note: tests that touch the RAG pipeline require `OPENAI_API_KEY` to be set.
+
 

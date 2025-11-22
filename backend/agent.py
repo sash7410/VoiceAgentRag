@@ -22,8 +22,8 @@ from livekit.agents.llm import ChatContext, ChatMessage, function_tool
 from livekit.plugins import openai as lk_openai
 
 from backend.config import load_config
-from backend.rag import build_handbook_reference
-from backend.tools import search_inventory
+from backend.rag import build_handbook_reference, retrieve_handbook_context
+from backend.tools import search_inventory, book_test_drive
 
 
 SKYLINE_SYSTEM_PROMPT = """
@@ -49,10 +49,15 @@ Knowledge source:
   answering. Prefer to base answers on the handbook and avoid guessing.
 
 Tools:
-- You can call a single internal tool: `search_inventory`, which returns available
-  vehicles that match a body type and budget range. When the user asks for help
-  finding a car in a given price range (for example a sedan between two prices),
-  you SHOULD call this tool and then explain the results in plain language.
+- You can call two internal tools:
+  - `search_inventory`, which returns available vehicles that match a body type
+    and budget range. When the user asks for help finding a car in a given
+    price range (for example a sedan between two prices), you SHOULD call this
+    tool and then explain the results in plain language.
+  - `book_test_drive_tool`, which records a simple test-drive booking in an
+    internal log. When the user explicitly asks to book a test drive and has
+    provided their contact details and chosen model, call this tool once and
+    then clearly confirm the appointment details back to the user.
 
 Behavior and guardrails:
 - Do not invent precise prices or promotions beyond what the handbook or tools
@@ -86,6 +91,9 @@ def _looks_like_factual_question(text: str) -> bool:
         "cargo",
         "mpg",
         "range",
+        "visit",
+        "sales visit",
+        "test drive",
     ]
     lowered = text.lower()
     return any(k in lowered for k in keywords)
@@ -121,6 +129,45 @@ async def inventory_search_tool(
     
     logger.info(f"✅ Found {len(results)} matching vehicles")
     return results
+
+
+@function_tool
+async def book_test_drive_tool(
+    customer_name: str,
+    contact_phone: str,
+    contact_email: str,
+    model: str,
+    preferred_time: str,
+) -> Dict[str, Any]:
+    """
+    Book a test drive for a specific model.
+
+    The agent should collect all parameters naturally in conversation before
+    calling this tool. The implementation simply records the request in an
+    in-memory list so we can inspect it during the demo.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "🗓️ Booking test drive: name=%s, phone=%s, email=%s, model=%s, time=%s",
+        customer_name,
+        contact_phone,
+        contact_email,
+        model,
+        preferred_time,
+    )
+
+    booking = book_test_drive(
+        customer_name=customer_name,
+        contact_phone=contact_phone,
+        contact_email=contact_email,
+        model=model,
+        preferred_time=preferred_time,
+    )
+
+    logger.info("✅ Test drive booking recorded")
+    return booking
 
 
 class SkylineVoiceAgent(voice.Agent):
@@ -166,38 +213,80 @@ async def entrypoint(ctx: JobContext) -> None:
     logger = logging.getLogger(__name__)
     
     logger.info("🚀 Skyline Motors agent starting...")
-    config = load_config()
-    logger.info(f"📡 Connecting to room: {ctx.room.name}")
 
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    logger.info("✅ Connected to LiveKit room")
+    # --- Config loading ----------------------------------------------------
+    try:
+        config = load_config()
+        logger.info(
+            "✅ Config loaded (LiveKit URL=%s, room=%s, handbook=%s)",
+            config.livekit.url,
+            config.livekit.default_room,
+            config.rag.dealer_handbook_path,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ Failed to load config: %s", exc)
+        raise
 
-    logger.info(f"🎙️ Initializing STT: {config.openai.stt_model}")
-    stt = lk_openai.STT(model=config.openai.stt_model, api_key=config.openai.api_key)
-    
-    logger.info(f"🔊 Initializing TTS: {config.openai.tts_model}")
-    tts = lk_openai.TTS(model=config.openai.tts_model, api_key=config.openai.api_key)
-    
-    logger.info(f"🧠 Initializing LLM: {config.openai.fast_model}")
-    llm = lk_openai.LLM(model=config.openai.fast_model, api_key=config.openai.api_key)
+    # --- RAG warmup --------------------------------------------------------
+    try:
+        logger.info("📚 Warming up RAG handbook index...")
+        # This call triggers PDF load + vector store build on first use
+        _ = retrieve_handbook_context("financing options", k=1)
+        logger.info("✅ RAG warmup complete")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ RAG warmup failed: %s", exc)
+        raise
+
+    # --- LiveKit room connection -------------------------------------------
+    try:
+        logger.info("📡 Connecting to room: %s", ctx.room.name)
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        logger.info("✅ Connected to LiveKit room")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ Failed to connect to LiveKit room: %s", exc)
+        raise
+
+    # --- Model / audio components -----------------------------------------
+    try:
+        logger.info("🎙️ Initializing STT: %s", config.openai.stt_model)
+        stt = lk_openai.STT(model=config.openai.stt_model, api_key=config.openai.api_key)
+
+        logger.info("🔊 Initializing TTS: %s", config.openai.tts_model)
+        tts = lk_openai.TTS(model=config.openai.tts_model, api_key=config.openai.api_key)
+
+        logger.info("🧠 Initializing LLM: %s", config.openai.fast_model)
+        llm = lk_openai.LLM(model=config.openai.fast_model, api_key=config.openai.api_key)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ Failed to initialize OpenAI components: %s", exc)
+        raise
 
     # Use Silero VAD for voice activity detection (required for non-streaming STT)
-    from livekit.plugins import silero
-    logger.info("🎯 Loading Silero VAD...")
-    vad = silero.VAD.load()
-    
-    logger.info("🔧 Creating agent session...")
-    session = voice.AgentSession(
-        stt=stt,
-        vad=vad,
-        llm=llm,
-        tts=tts,
-        tools=[inventory_search_tool],
-        allow_interruptions=True,
-    )
+    try:
+        from livekit.plugins import silero
 
-    agent = SkylineVoiceAgent()
-    logger.info("✅ Agent initialized, starting session...")
+        logger.info("🎯 Loading Silero VAD...")
+        vad = silero.VAD.load()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ Failed to initialize VAD: %s", exc)
+        raise
+
+    # --- Agent session -----------------------------------------------------
+    try:
+        logger.info("🔧 Creating agent session...")
+        session = voice.AgentSession(
+            stt=stt,
+            vad=vad,
+            llm=llm,
+            tts=tts,
+            tools=[inventory_search_tool, book_test_drive_tool],
+            allow_interruptions=True,
+        )
+
+        agent = SkylineVoiceAgent()
+        logger.info("✅ Agent initialized, starting session...")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("❌ Failed to create agent session: %s", exc)
+        raise
 
     async def _publish_transcript(payload: Dict[str, str]) -> None:
         import logging
@@ -255,8 +344,13 @@ async def entrypoint(ctx: JobContext) -> None:
             )
         )
 
-    await session.start(agent, room=ctx.room)
-    logger.info("🎉 Session started! Agent is now live and listening...")
+    try:
+        logger.info("▶️ Starting agent session loop...")
+        await session.start(agent, room=ctx.room)
+        logger.info("🎉 Session ended cleanly")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("💥 Agent session crashed: %s", exc)
+        raise
 
 
 def main() -> None:

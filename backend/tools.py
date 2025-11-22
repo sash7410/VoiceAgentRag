@@ -124,6 +124,45 @@ def format_inventory_for_llm(vehicles: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Vehicle", "INVENTORY", "search_inventory", "format_inventory_for_llm"]
+# ---------------------------------------------------------------------------
+# Simple in-memory test-drive "booking" store
+# ---------------------------------------------------------------------------
+
+TEST_DRIVE_BOOKINGS: List[Dict[str, Any]] = []
+
+
+def book_test_drive(
+    customer_name: str,
+    contact_phone: str,
+    contact_email: str,
+    model: str,
+    preferred_time: str,
+) -> Dict[str, Any]:
+    """
+    Record a very simple test-drive request in memory.
+
+    This is intentionally lightweight: for the demo we only need to show that
+    the agent can call a tool with structured parameters and "store" a booking.
+    In a real system this would call a dealership calendar/CRM API.
+    """
+    booking = {
+        "customer_name": customer_name,
+        "contact_phone": contact_phone,
+        "contact_email": contact_email,
+        "model": model,
+        "preferred_time": preferred_time,
+    }
+    TEST_DRIVE_BOOKINGS.append(booking)
+    return booking
+
+
+__all__ = [
+    "Vehicle",
+    "INVENTORY",
+    "search_inventory",
+    "format_inventory_for_llm",
+    "TEST_DRIVE_BOOKINGS",
+    "book_test_drive",
+]
 
 

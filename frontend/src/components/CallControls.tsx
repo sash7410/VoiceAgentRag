@@ -11,21 +11,21 @@ export const CallControls: React.FC<CallControlsProps> = ({
   onStart,
   onEnd
 }) => {
+  const handleClick = () => {
+    if (isConnected) {
+      void onEnd();
+    } else {
+      void onStart();
+    }
+  };
+
   return (
     <div className="call-controls">
       <button
         className="primary-button"
-        onClick={() => onStart()}
-        disabled={isConnected}
+        onClick={handleClick}
       >
-        Start Call
-      </button>
-      <button
-        className="secondary-button"
-        onClick={() => onEnd()}
-        disabled={!isConnected}
-      >
-        End Call
+        {isConnected ? "End Call" : "Start Call"}
       </button>
     </div>
   );

@@ -85,6 +85,11 @@ def _get_rag() -> HandbookRAG:
     return rag
 
 
+def reset_rag_cache() -> None:
+    """Clear the cached HandbookRAG instance so a new PDF can be indexed."""
+    _get_rag.cache_clear()
+
+
 def retrieve_handbook_context(query: str, k: int | None = None) -> List[str]:
     """Public helper used by the agent to fetch relevant handbook snippets."""
     rag = _get_rag()
